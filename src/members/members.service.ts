@@ -1,14 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { ModelType } from '@typegoose/typegoose/lib/types';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
 import { DuplicateError } from 'src/errors/duplicate-error';
-import { InjectModel } from 'nestjs-typegoose';
-import { MemberModel } from './member.model';
+import { Member, MemberDocument } from './members.model';
 
 @Injectable()
-export class MemberService {
+export class MembersService {
   constructor(
-    @InjectModel(MemberModel)
-    private readonly memberModel: ModelType<MemberModel>,
+    @InjectModel(Member.name)
+    private memberModel: Model<MemberDocument>,
   ) {}
 
   async findByGroupId(groupId: number) {
@@ -19,7 +19,7 @@ export class MemberService {
     return this.memberModel.find().exec();
   }
 
-  async create(members: MemberModel[], groupId: number) {
+  async create(members: Member[], groupId: number) {
     const existedMembers = await this.findByGroupId(groupId);
     const duplicateMembers = members
       .filter(({ nickname }) =>
@@ -39,7 +39,18 @@ export class MemberService {
     await this.memberModel.create(members);
   }
 
-  async update(member: MemberModel) {
+  async update(member: Member) {
+    const [existedMember] = await this.memberModel.find({
+      groupId: member.groupId,
+      nickname: member.nickname,
+    });
+
+    if (existedMember) {
+      throw new DuplicateError(
+        `Duplicate error occured during the attempt to add <b>${existedMember.nickname} - ${existedMember.username}</b>`,
+      );
+    }
+
     return await this.memberModel.updateOne(member);
   }
 

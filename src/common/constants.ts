@@ -1,14 +1,11 @@
-import { Markup } from 'telegraf';
-
-export enum ConfirmAction {
-  YES = '✅ Yes',
-  NO = '❌ No',
+export enum ChatType {
+  GROUP = 'group',
+  PRIVATE = 'private',
+  SUPERGROUP = 'supergroup',
+  CHANNEL = 'channel',
 }
 
-export const confirmButtons = Markup.keyboard(
-  [
-    Markup.button.callback(ConfirmAction.NO, 'no'),
-    Markup.button.callback(ConfirmAction.YES, 'yes'),
-  ],
-  { columns: 2 },
-);
+export enum SceneName {
+  MAIN = 'main',
+  MEMBERS = 'members',
+}

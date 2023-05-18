@@ -2,28 +2,32 @@ import { Hears, SceneEnter, Scene } from 'nestjs-telegraf';
 import { Markup } from 'telegraf';
 import { SceneContext } from 'telegraf/typings/scenes';
 import { ValidationError } from 'src/errors/validation-error';
-import { MemberService } from './member.service';
+import { MembersService } from './members.service';
 import {
+  BackAction,
   MemberEnterAction,
   MemberMenuAction,
   ROW_SEPARATOR,
   memberMenuButtons,
-} from './member.constants';
+} from './members.constants';
 import { getGroupId, getMessageText } from 'src/app.utils';
-import { AdminSceneSessionType } from './member.context';
-import { MemberModel } from './member.model';
-import { ConfirmAction, confirmButtons } from 'src/common/constants';
+import { ConfirmAction } from 'src/common/actions';
+import { AdminSceneSessionType } from './members.context';
+import { Member } from './members.model';
+import { confirmButtons } from 'src/common/buttons';
+import { SceneName } from 'src/common/constants';
+import { DuplicateError } from 'src/errors/duplicate-error';
 
-@Scene('member')
-export class MemberScene {
+@Scene(SceneName.MEMBERS)
+export class MembersScene {
   private choosedNickname?: string | null;
   private sessionType?: MemberMenuAction | MemberEnterAction;
 
-  constructor(private readonly memberService: MemberService) {}
+  constructor(private readonly memberService: MembersService) {}
 
   @SceneEnter()
   async enter(ctx: SceneContext) {
-    await ctx.reply('Members menu', memberMenuButtons);
+    await ctx.reply('Welcome to "Members" menu', memberMenuButtons);
   }
 
   @Hears(MemberMenuAction.GET)
@@ -33,6 +37,8 @@ export class MemberScene {
 
     if (!members.length) {
       await ctx.reply('The list of members is empty.');
+      this.sessionType = MemberEnterAction.CONFIRM_TO_ADD;
+      await ctx.reply('Do you want to add members?', confirmButtons);
       return;
     }
 
@@ -53,7 +59,7 @@ export class MemberScene {
     this.sessionType = MemberMenuAction.CREATE;
 
     await ctx.reply(
-      `Please, enter the list of members in the appropriate format: ${ROW_SEPARATOR}nickname - username${ROW_SEPARATOR}nickname2 - username2${ROW_SEPARATOR}etc...${ROW_SEPARATOR} Example:${ROW_SEPARATOR}Alex - not_surrender`,
+      'Please, enter the list of members in the appropriate format: \nnickname - username\nExample: Alex - not_surrender',
       Markup.forceReply(),
     );
 
@@ -71,8 +77,9 @@ export class MemberScene {
     const members = await this.memberService.findByGroupId(groupId);
 
     if (!members.length) {
-      this.sessionType = null;
       await ctx.reply('The list of members is empty.');
+      this.sessionType = MemberEnterAction.CONFIRM_TO_ADD;
+      await ctx.reply('Do you want to add members?', {});
       return;
     }
 
@@ -80,9 +87,11 @@ export class MemberScene {
       Markup.button.callback(nickname, nickname),
     );
 
+    buttonMembers.push(Markup.button.callback('⏎ Back', 'back'));
+
     await ctx.reply(
       'Please, choose a member to edit:',
-      Markup.keyboard(buttonMembers),
+      Markup.keyboard(buttonMembers, { columns: 2 }),
     );
 
     setTimeout(() => {
@@ -98,8 +107,9 @@ export class MemberScene {
     const members = await this.memberService.findByGroupId(groupId);
 
     if (!members.length) {
-      this.sessionType = null;
       await ctx.reply('The list of members is empty.');
+      this.sessionType = MemberEnterAction.CONFIRM_TO_ADD;
+      await ctx.reply('Do you want to add members?', confirmButtons);
       return;
     }
 
@@ -122,55 +132,90 @@ export class MemberScene {
     this.sessionType = null;
 
     await ctx.reply(
-      'You have been exited from "admin" menu',
+      'You have been exited from "Members" menu',
       Markup.removeKeyboard(),
     );
     await ctx.scene.leave();
   }
 
   @Hears(ConfirmAction.NO)
-  async cancelDeleting(ctx: SceneContext<AdminSceneSessionType>) {
-    await this.delete(ctx);
+  async cancel(ctx: SceneContext<AdminSceneSessionType>) {
+    // ctx.scene.leave();
+    switch (this.sessionType) {
+      case MemberMenuAction.CREATE:
+      case MemberEnterAction.CONFIRM_TO_ADD:
+        this.sessionType = null;
+        await ctx.scene.reenter();
+        break;
+
+      case MemberMenuAction.DELETE:
+      case MemberEnterAction.CONFIRM_TO_DELETE:
+        this.delete(ctx);
+        break;
+    }
   }
 
   @Hears(ConfirmAction.YES)
-  async confirmDeleting(ctx: SceneContext<AdminSceneSessionType>) {
-    const groupId = getGroupId(ctx);
-    await this.memberService.delete(this.choosedNickname, groupId);
-    await ctx.replyWithHTML(
-      `The <b>${this.choosedNickname}</b> has been removed.`,
-    );
-    this.sessionType = null;
-    await this.delete(ctx);
+  async confirm(ctx: SceneContext<AdminSceneSessionType>) {
+    switch (this.sessionType) {
+      case MemberEnterAction.CONFIRM_TO_ADD:
+        this.add(ctx);
+        break;
+
+      case MemberEnterAction.CONFIRM_TO_DELETE:
+        const groupId = getGroupId(ctx);
+        await this.memberService.delete(this.choosedNickname, groupId);
+        await ctx.replyWithHTML(
+          `The <b>${this.choosedNickname}</b> has been removed.`,
+          Markup.removeKeyboard(),
+        );
+        await this.delete(ctx);
+
+        break;
+    }
   }
 
   // TODO: refactor this method
   @Hears(/.*/)
   async balancer(ctx: SceneContext<AdminSceneSessionType>) {
+    // ctx.scene.leave();
+    const message = getMessageText(ctx);
+
     switch (this.sessionType) {
       case MemberMenuAction.CREATE:
-        const membersStr = getMessageText(ctx);
         try {
-          this.validateMembersString(membersStr);
+          this.validateMemberListString(message);
+
           const groupId = getGroupId(ctx);
           const membersInput = this.getMembersInputByMembersString(
-            membersStr,
+            message,
             groupId,
           );
+
           await this.memberService.create(membersInput, groupId);
+
           this.sessionType = null;
           await ctx.reply('The users have been added successfully.');
           await this.getList(ctx);
           await ctx.scene.reenter();
         } catch (err) {
-          if (err instanceof Error) {
-            this.sessionType = null;
-            await ctx.replyWithHTML(err.message, memberMenuButtons);
+          if (err instanceof ValidationError) {
+            await ctx.replyWithHTML(err.message);
+          } else if (err instanceof DuplicateError) {
+            await ctx.replyWithHTML(err.message);
           }
+          this.sessionType = MemberEnterAction.CONFIRM_TO_ADD;
+          await ctx.replyWithHTML('Do you want to try again?', confirmButtons);
         }
         break;
 
       case MemberMenuAction.UPDATE:
+        if (message === BackAction) {
+          this.sessionType = null;
+          await ctx.scene.reenter();
+          return;
+        }
+
         this.sessionType = MemberEnterAction.UPDATE;
         await ctx.reply(
           `Please, enter a new nickname of the member in the appropriate format:${ROW_SEPARATOR}nickname - username`,
@@ -179,8 +224,14 @@ export class MemberScene {
         break;
 
       case MemberMenuAction.DELETE:
+        if (message === BackAction) {
+          this.sessionType = null;
+          await ctx.scene.reenter();
+          return;
+        }
+
         this.sessionType = MemberEnterAction.CONFIRM_TO_DELETE;
-        this.choosedNickname = getMessageText(ctx);
+        this.choosedNickname = message;
         await ctx.replyWithHTML(
           `Are you sure you want to remove <b>${this.choosedNickname}</b>? All related information will be removed as well.`,
           confirmButtons,
@@ -188,23 +239,45 @@ export class MemberScene {
         break;
 
       case MemberEnterAction.UPDATE:
-        await ctx.reply('GOT IT');
+        try {
+          this.validateMemberListString(message);
+          const groupId = getGroupId(ctx);
+          const [memberInput] = this.getMembersInputByMembersString(
+            message,
+            groupId,
+          );
+
+          await this.memberService.update(memberInput);
+        } catch (err) {
+          if (err instanceof ValidationError) {
+            await ctx.replyWithHTML(err.message);
+          } else if (err instanceof DuplicateError) {
+            await ctx.replyWithHTML(err.message);
+          }
+          this.sessionType = MemberEnterAction.CONFIRM_TO_ADD;
+          await ctx.replyWithHTML('Do you want to try again?', confirmButtons);
+        }
         break;
     }
   }
 
-  private validateMembersString(members: string) {
+  private validateMemberListString(members: string) {
     const splittedMembers = members.split(ROW_SEPARATOR);
-    const notValidMembers = splittedMembers.filter(
-      (member) => !this.validateMemberString(member),
-    );
+    const formatErrors = splittedMembers
+      .filter((member) => !this.validateMemberString(member))
+      .map((member) => 'Format error occured at: ' + member.trim() + '\n')
+      .join('');
 
-    if (notValidMembers.length) {
-      throw new ValidationError('');
+    if (formatErrors) {
+      throw new ValidationError(formatErrors);
     }
   }
 
   private validateMemberString(member: string) {
+    if (member.length < 3) {
+      return false;
+    }
+
     const splittedValue = member.split('-');
     return splittedValue.length === 2;
   }
@@ -217,11 +290,11 @@ export class MemberScene {
   private getMembersInputByMembersString(
     members: string,
     groupId: number,
-  ): MemberModel[] {
+  ): Member[] {
     const rows = members.split(ROW_SEPARATOR);
     const membersInput = rows.map((row) => {
       const [name, username] = this.parseMemberString(row);
-      return new MemberModel(name, username, groupId);
+      return new Member(name, username, groupId);
     });
 
     return membersInput;

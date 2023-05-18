@@ -1,28 +1,28 @@
-import { TelegrafModule } from 'nestjs-telegraf';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { TypegooseModule } from 'nestjs-typegoose';
-import { getMongoConfig } from './configs/mongo.config';
-import { GroupModule } from './group/group.module';
-import { MemberModule } from './member/member.module';
+import { MongooseModule } from '@nestjs/mongoose';
+import { TelegrafModule } from 'nestjs-telegraf';
+import { GroupsModule } from './groups/groups.module';
+import { MembersModule } from './members/members.module';
 import { getTeleramConfig } from './configs/telegram.config';
 import { AppUpdate } from './app.update';
+import { getMongoConfig } from './configs/mongo.config';
 
 @Module({
   imports: [
     ConfigModule.forRoot(),
+    MongooseModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: getMongoConfig,
+      inject: [ConfigService],
+    }),
     TelegrafModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: getTeleramConfig,
       inject: [ConfigService],
     }),
-    TypegooseModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: getMongoConfig,
-    }),
-    GroupModule,
-    MemberModule,
+    GroupsModule,
+    MembersModule,
   ],
   providers: [AppUpdate],
 })

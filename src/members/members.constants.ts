@@ -2,6 +2,8 @@ import { Markup } from 'telegraf';
 
 export const ROW_SEPARATOR = '\n\n';
 
+export const BackAction = '⏎ Back';
+
 export enum MemberMenuAction {
   GET = '📖 List of members',
   CREATE = '➕ Add members',
@@ -12,6 +14,7 @@ export enum MemberMenuAction {
 
 export enum MemberEnterAction {
   UPDATE = 'Update',
+  CONFIRM_TO_ADD = 'ConfirmToAdd',
   CONFIRM_TO_DELETE = 'ConfirmToDelete',
 }
 

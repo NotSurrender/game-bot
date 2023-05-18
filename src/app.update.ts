@@ -1,56 +1,40 @@
 import { Telegraf, Context, Markup } from 'telegraf';
 import { InjectBot, Start, Hears, Update, Command } from 'nestjs-telegraf';
-import { getGroupId, getChatType } from './app.utils';
-import { GroupService } from './group/group.service';
-import { MemberService } from './member/member.service';
+import { getGroupId } from './app.utils';
+import { GroupsService } from './groups/groups.service';
+import { MembersService } from './members/members.service';
 import { SceneContext } from 'telegraf/typings/scenes';
-import { ConfirmAction, confirmButtons } from './common/constants';
+import { ConfirmAction } from './common/actions';
+import { SceneName } from './common/constants';
 
 @Update()
 export class AppUpdate {
   constructor(
     @InjectBot()
     private readonly bot: Telegraf<Context>,
-    private readonly groupService: GroupService,
-    private readonly memberService: MemberService,
+    private readonly groupService: GroupsService,
+    private readonly memberService: MembersService,
   ) {}
 
   @Start()
-  async start(ctx: Context) {
-    const chatType = getChatType(ctx);
+  async start(ctx: Context) {}
 
-    if (chatType !== 'group') {
-      await ctx.reply(
-        `The GameBot works only in Telegram groups. It does not support ${chatType} chat types.`,
-      );
-      return;
-    }
-
+  @Command('members')
+  async members(ctx: SceneContext) {
     const groupId = getGroupId(ctx);
+
     const existedGroup = await this.groupService.findByGroupId(groupId);
 
     if (!existedGroup) {
       await this.groupService.create(groupId);
     }
 
-    const groupMembers = await this.memberService.findByGroupId(groupId);
-
-    if (!groupMembers.length) {
-      await ctx.reply(
-        'You have not registered any chat members. Do you want to start?',
-        confirmButtons,
-      );
-    }
-  }
-
-  @Command('members')
-  async members(ctx: SceneContext) {
-    await ctx.scene.enter('member');
+    await ctx.scene.enter(SceneName.MEMBERS);
   }
 
   @Hears(ConfirmAction.YES)
   async goToMemberScene(ctx: SceneContext) {
-    await ctx.scene.enter('member');
+    await this.members(ctx);
   }
 
   @Hears(ConfirmAction.NO)
